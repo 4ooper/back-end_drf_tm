@@ -4,6 +4,7 @@ from gettext import find
 from itertools import count
 import json
 from os import stat
+from TimeManage.exceptions import NoneAuthorized
 from rest_framework.response import Response
 from rest_framework import mixins
 from rest_framework.viewsets import GenericViewSet
@@ -14,7 +15,6 @@ from .models import *
 from django.core.paginator import Paginator
 import math
 from rest_framework import status
-
 
 class UserView(APIView):
     def get(self, request):
@@ -50,30 +50,36 @@ class RelationView(APIView):
     def get(self, request):
         try:
             if not request.user.pk:
-                raise Exception()
+                raise NoneAuthorized()
             page = request.GET.get("page", '')
             relations = Relations.objects.filter(userID = request.user.pk)
             paginator = Paginator(relations, 10)
             return Response(RelationSerializer(paginator.page(page), many=True).data)
-        except Exception as e:
-            print(e)
-            return Response(status=404, data={'error': 'Token not found'})
+        except NoneAuthorized as e:
+            return Response(status=403, data={'error': 'Invalid token'})
+        except:
+            return Response(status=500, data={'error': 'Something went wrong.'})
 
     def post(self, request):
         labSerizalizer = LabsSerializer(data={"name": request.data.get('labName'), "count":request.data.get('count'), "deadline": request.data.get('deadline')})
         try:
+            if not request.user.pk:
+                raise NoneAuthorized()
             getStyle = CardStyles.objects.get(pk=request.data.get('style'))
             if not getStyle:
                 raise Exception()
+        except NoneAuthorized as e:
+            return Response(status=403, data={'error': 'Invalid token'})
         except:
             return Response(status=404, data={'error': 'Incorrect style'})
         if labSerizalizer.is_valid(raise_exception=True):
             laba_saved = labSerizalizer.save()
             Relations.objects.create(styleID=CardStyles.objects.get(pk=request.data.get('style')), userID=User.objects.get(pk=request.user.pk), labID=Laboratories.objects.get(pk=laba_saved.pk))
-        return Response({"success": "Relation '{}' created successfully".format(laba_saved.name)}, status=200)
+            return Response({"success": "Relation '{}' created successfully".format(laba_saved.name)}, status=200)
+        else:
+            return Response(status=500, data={'error': 'Something went wrong.'})
 
     def delete(self, request):
-        print('delete')
         try:
             labID = request.data.get('id')
             findLab = Laboratories.objects.get(pk = labID)
@@ -113,6 +119,13 @@ class RelationSearch(APIView):
 
 class TotalView(APIView):
     def get(self,request):
+        try:
+            if not request.user:
+                raise NoneAuthorized()
+        except NoneAuthorized as e:
+            return Response(status=403, data={'error': 'Invalid token'})
+        except:
+            return Response(status=status.HTTP_401_U)
         relations = Relations.objects.filter(userID = request.user.pk)
         data = {'count': math.ceil(relations.count()/10)}
         total = TotalSerializer(data).data
@@ -123,24 +136,35 @@ class ReadyTasksView(APIView):
         try:
             if not id:
                 raise Exception()
+            if not request.user:
+                raise NoneAuthorized()
             ready = ReadyTasks.objects.filter(user_id = request.user.pk).filter(lab_id = id)
             return Response(ReadySerializer(ready, many=True).data)
+        except NoneAuthorized as e:
+            return Response(status=403, data={'error': 'Invalid token'})
         except:
             return Response(status=status.HTTP_404_NOT_FOUND)
 
     def post(self, request):
-        data = request.data.copy()
-        data.update({"user": request.user.pk})
-        serializer = ReadySerializer(data=data)
-        if serializer.is_valid(raise_exception=True):
-            labid = serializer.validated_data.get("lab").pk
-            serializer.save()
-            laboratory = Laboratories.objects.get(pk=labid)
-            updateSerializer = LabsSerializer(laboratory, data={"ready": ReadyTasks.objects.filter(lab_id=labid).count()}, partial=True)
-            if(updateSerializer.is_valid(raise_exception=True)):
-                updateSerializer.save()
-                return Response(serializer.data)
-        return Response(status=status.HTTP_200_OK)
+        try:
+            if not request.user:
+                raise NoneAuthorized()
+            data = request.data.copy()
+            data.update({"user": request.user.pk})
+            serializer = ReadySerializer(data=data)
+            if serializer.is_valid(raise_exception=True):
+                labid = serializer.validated_data.get("lab").pk
+                serializer.save()
+                laboratory = Laboratories.objects.get(pk=labid)
+                updateSerializer = LabsSerializer(laboratory, data={"ready": ReadyTasks.objects.filter(lab_id=labid).count()}, partial=True)
+                if(updateSerializer.is_valid(raise_exception=True)):
+                    updateSerializer.save()
+                    return Response(serializer.data)
+            return Response(status=status.HTTP_200_OK)
+        except NoneAuthorized as e:
+            return Response(status=403, data={'error': 'Invalid token'})
+        except:
+            return Response(status=500, data={'error': 'Something went wrong.'})
         
     def delete(self,request):
         ready_task = request.data.get('ready_task')
